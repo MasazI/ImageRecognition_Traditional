@@ -7,7 +7,7 @@ import random
 
 def main():
     if len(sys.argv) < 4:
-        print "./crop.faces.py INPUT_DIR OUTPUT_DIR N"
+        print "./crop_negative.py INPUT_DIR OUTPUT_DIR N"
         return
     print "start."
     input_dir = sys.argv[1]

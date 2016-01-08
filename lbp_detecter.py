@@ -1,5 +1,8 @@
 # enGcoding: utf-8
 
+import sys, os
+
+from skimage import transform
 from skimage import feature
 from skimage import io
 from skimage import color
@@ -8,31 +11,68 @@ from glob import iglob
 import pickle
 import numpy as np
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
+import math
+
+WINDOW_SIZE = 48
+CELL_SIZE = 4
+THRESHOLD = 1.0
+LBP_POINTS = 24
+LBP_RADIUS = 3
+ 
 # セルごとのLBP特徴計算
 def get_histogram(image, cell_size, lbp_points, lbp_radius):
     lbp = feature.local_binary_pattern(image, lbp_points, lbp_radius, 'uniform')
     bins = lbp_points + 2
     histogram = np.zeros(shape=(image.shape[0]/cell_size, image.shape[1]/cell_size, bins), dtype=np.int)
-
     for y in range(0, image.shape[0] - cell_size, cell_size):
         for x in range(0, image.shape[1] - cell_size, cell_size):
+            #print('image x: %d, y: %d' % (x, y))
             for dy in range(cell_size):
                 for dx in range(cell_size):
                     histogram[y/cell_size, x/cell_size, int(lbp[y + dy, x + dx])] += 1
     return histogram
 
 
+def get_histogram_feature(lbp):
+    bins = LBP_POINTS + 2
+    histograms = []
+    for y in range(0, WINDOW_SIZE, CELL_SIZE):
+        for x in range(0, WINDOW_SIZE, CELL_SIZE):
+            histogram = np.zeros(shape = (bins,))
+            for dy in range(CELL_SIZE):
+                for dx in range(CELL_SIZE):
+                    histogram[lbp[y + dy, x + dx]] += 1
+            histograms.append(histogram)
+    return np.concatenate(histograms)
+
+
 # directory から取り出して特徴量を計算
 def get_features(directory):
-    LBP_POINTS = 24
-    LBP_RADIUS = 3
     features = []
     for fn in iglob('%s/*.jpg' % directory):
         image = color.rgb2gray(io.imread(fn))
-        features.append(get_histogram(image, 4, LBP_POINTS, LBP_RADIUS).reshape(-1))
+        if image.shape[0] != WINDOW_SIZE or image.shape[1] != WINDOW_SIZE:
+            print("error size: %d, %d" % (image.shape[0], image.shape[1]))
+            continue
+        features.append(get_histogram(image, CELL_SIZE, LBP_POINTS, LBP_RADIUS).reshape(-1))
         # flipした画像を追加
-        features.append(get_histogram(np.fliplr(image), 4, LBP_POINTS, LBP_RADIUS).reshape(-1))
+        features.append(get_histogram(np.fliplr(image), CELL_SIZE, LBP_POINTS, LBP_RADIUS).reshape(-1))
+    return features
+
+
+def get_features_(directory):
+    features = []
+    for fn in iglob('%s/*.jpg' % directory):
+        image = color.rgb2gray(io.imread(fn))
+        lbp_image = feature.local_binary_pattern(
+            image, LBP_POINTS, LBP_RADIUS, 'uniform')
+        flip_lbp_image = feature.local_binary_pattern(
+            np.fliplr(image), LBP_POINTS, LBP_RADIUS, 'uniform')
+        features.append(get_histogram_feature(lbp_image))
+        features.append(get_histogram_feature(flip_lbp_image))
     return features
 
 
@@ -54,8 +94,6 @@ def get_pos_and_neg(pos_dir, neg_dir, save_path):
 import sklearn.svm
 def train(data_path, save_path):
     X, y = pickle.load(open(data_path))
-    print len(X)
-    print len(y)
     classifier = sklearn.svm.LinearSVC(C=0.0001)
     classifier.fit(X, y)
     pickle.dump(classifier, open(save_path, 'w'))
@@ -72,37 +110,29 @@ def eval(model_path, eval_path):
     print('accuracy: %f' % (float(correct)/len(y)))
 
 
-# スコアの計算
-def compute_score_map(template, target):
-    th, tw = template.shape
-    score_map = np.zeros(shape=(target.shape[0] - th, target.shape[1] - tw))
-    for y in range(score_map.shape[0]):
-        for x in range(score_map.shape[1]):
-            diff = target[y:y + th, x:x + tw] - template
-            score_map[y, x] = np.square(diff).sum()
-    return score_map
-
-
 # search image using pyramid of image
 def search(query_image, svm):
-    WIDTH, HEIGHT = (128, 128)
-    CELL_SIZE = 4
-    THRESHOLD = 3
+    WIDTH, HEIGHT = (WINDOW_SIZE, WINDOW_SIZE)
     detections = []
     scale_factor = 2.0 ** (-1.0/8.0)
     target = color.rgb2gray(io.imread(query_image))
     target_scaled = target + 0
+    print target.shape
     for s in range(16):
-        histogram = get_histogram(target_scaled)
-        for y in range(0, histogram.shape[0] - HEIGHT / CELL_SIZE):
-            for x in range(0, histogram.shape[1] - WIDTH / CELL_SIZE):
+        histogram = get_histogram(target_scaled, CELL_SIZE, LBP_POINTS, LBP_RADIUS)
+        for y in range(0, histogram.shape[0] - HEIGHT/CELL_SIZE):
+            for x in range(0, histogram.shape[1] - WIDTH/CELL_SIZE):
+                #print('x:%d, y:%d' % (x, y))
                 feature = histogram[y:y + HEIGHT / CELL_SIZE, x:x + WIDTH / CELL_SIZE].reshape(-1)
                 score = svm.decision_function(feature)
+                category = svm.predict(feature)
                 if score[0] > THRESHOLD:
-                    scale = (scale_facgor ** s)
-                    detections.append({'x:' x * cell_size/scale, 'y:' y * cell_size/scale, 'width': WIDTH/scale, 'height': HEIGHT/scale, 'score': score})
+                    print('detect! %f', score[0])
+                    scale = (scale_factor ** s)
+                    detections.append({'x': x * CELL_SIZE/scale, 'y': y * CELL_SIZE/scale, 'width': WIDTH/scale, 'height': HEIGHT/scale, 'score': score[0], 'category': category[0]})
         target_scaled = transform.rescale(target_scaled, scale_factor)
-
+    print('the number of detections: %d' % (len(detections)))
+    return detections
 
 # non-maximum suppression
 def nms(a, b):
@@ -115,17 +145,18 @@ def nms(a, b):
     bottom = min(a['y'] + a['height'], b['y'] + b['height'])
     intersect = max(0, (right - left) * (bottom - top))
     union = a['width'] * a['height'] + b['width'] * b['height'] - intersect
+    if union == 0: return 0
     return intersect / union
 
 
 def test():
     print '-- test lbp'
-    LBP_POINTS = 24
-    LBP_RADIUS = 3
     image = io.imread('images/image1.jpg')
     gray = color.rgb2gray(image)
-    histogram = get_histogram(gray, 4, LBP_POINTS, LBP_RADIUS)
+    histogram = get_histogram(gray, CELL_SIZE, LBP_POINTS, LBP_RADIUS)
     feature_vec = histogram.reshape(-1)
+    print len(feature_vec)
+    print feature_vec
     print histogram.shape
     print histogram
     print feature_vec
@@ -133,39 +164,95 @@ def test():
     print '-- test extract train features'
     pos_dir = './flag/positive'
     neg_dir = './flag/negative'
-    features_save_path = './examples/flag_v1.pkl'
+    features_save_path = './examples/flag_v2.pkl'
     get_pos_and_neg(pos_dir, neg_dir, features_save_path)
 
     print '-- test extract eval features'
-    eval_post_dir = './flag/test/positive'
+    eval_pos_dir = './flag/test/positive'
     eval_neg_dir = './flag/test/negative'
-    eval_features_save_path = './examples/flag_v1_eval.pkl'
-    get_pos_and_neg(eval_post_dir, eval_neg_dir, eval_features_save_path)
+    eval_features_save_path = './examples/flag_v2_eval.pkl'
+    get_pos_and_neg(eval_pos_dir, eval_neg_dir, eval_features_save_path)
 
     print '-- test train'
-    train_save_path = './train/train_flag_v1.pkl'
+    train_save_path = './train/train_flag_v2.pkl'
     train(features_save_path, train_save_path)
        
     print '-- test eval accuracy'
     eval(train_save_path, eval_features_save_path)
-    
 
+    print "-- test detection"
+    classifier = pickle.load(open(train_save_path))
+    print './query/flag_positive_easy_1.jpg'
+    detections = search('./query/flag_positive_easy_1.jpg', classifier)
 
-def detect():
-    # scoreでソート
+    if len(detections) == 0:
+        print "can not detect."
+        exit()
+
     detections = sorted(detections, key = lambda d: d['score'], reverse = True)
     deleted = set()
     
     for i in range(len(detections)):
-        if i in deleted : continue
+        if i in deleted: continue
         for j in range(i + 1, len(detections)):
             if nms(detections[i], detections[j]) > 0.3:
                 deleted.add(j)
     detections = [d for i, d in enumerate(detections) if not i in deleted]
+    print detections
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
+    query = io.imread('./query/flag_positive_easy_1.jpg')
+    ax.imshow(query)
+    for detection in detections:
+        x = detection['x']
+        y = detection['y']
+        width = detection['width']
+        height = detection['height']
+        rect = mpatches.Rectangle((x, y), width, height, fill=False, edgecolor='red', linewidth=2)
+        ax.add_patch(rect)
+    plt.show()
+
+def test_detect(query_path):
+    classifier = pickle.load(open('./train/train_flag_v2.pkl'))
+    detections = search(query_path, classifier)
+    if len(detections) == 0:
+        print "can not detect."
+        exit()
+
+    detections = sorted(detections, key = lambda d: d['score'], reverse = True)
+    deleted = set()
+    print detections
+    for i in range(len(detections)):
+        if i in deleted: continue
+        for j in range(i + 1, len(detections)):
+            if nms(detections[i], detections[j]) > 0.3:
+                deleted.add(j)
+    detections = [d for i, d in enumerate(detections) if not i in deleted]
+    print detections
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
+    query = io.imread(query_path)
+    ax.imshow(query)
+    for detection in detections:
+        x = detection['x']
+        y = detection['y']
+        width = detection['width']
+        height = detection['height']
+        rect = mpatches.Rectangle((x, y), width, height, fill=False, edgecolor='red', linewidth=2)
+        ax.add_patch(rect)
+    plt.show()
 
 
 if __name__ == '__main__':
-    test()
+    if len(sys.argv) < 2:
+        print "./lbp_detecter.py <train or detect>"
+        exit()
+    process_type = sys.argv[1]
+
+    if process_type == 'train':
+        test()
+    elif process_type == 'detect': 
+        test_detect("./query/pos_query_1.jpg")
+    else:
+        print "ineffective option."
 
 #io.imshow(image)
 #io.show()
