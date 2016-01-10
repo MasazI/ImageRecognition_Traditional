@@ -17,10 +17,10 @@ import matplotlib.patches as mpatches
 import math
 
 WINDOW_SIZE = 48
-CELL_SIZE = 4
+CELL_SIZE = 2
 THRESHOLD = 1.0
-LBP_POINTS = 24
-LBP_RADIUS = 3
+LBP_POINTS = 16
+LBP_RADIUS = 1
  
 # セルごとのLBP特徴計算
 def get_histogram(image, cell_size, lbp_points, lbp_radius):
@@ -149,7 +149,50 @@ def nms(a, b):
     return intersect / union
 
 
+def hist(ax, lbp):
+    n_bins = lbp.max() + 1
+    return ax.hist(lbp.ravel(), normed=True, bins=n_bins, range=(0, n_bins),
+                   facecolor='0.5')
+
+
+def test_lbp():
+    print '-- test just lbp feature'
+    #image1 = color.rgb2gray(io.imread('./flag/positive/posi_ISIS_0101010048_00000015.jpg'))
+    #image2 = color.rgb2gray(io.imread('./flag/positive/posi_ISIS_0101010217_00000082.jpg'))
+    #image3 = color.rgb2gray(io.imread('./flag/positive/posi_ISIS_0202010084_00000453.jpg'))
+
+    image1 = color.rgb2gray(io.imread('./flag/negative/113.jpg'))
+    image2 = color.rgb2gray(io.imread('./flag/negative/256.jpg'))
+    image3 = color.rgb2gray(io.imread('./flag/negative/1024.jpg'))
+ 
+ 
+    lbp1 = feature.local_binary_pattern(image1, LBP_POINTS, LBP_RADIUS, 'uniform')
+    lbp2 = feature.local_binary_pattern(image2, LBP_POINTS, LBP_RADIUS, 'uniform')
+    lbp3 = feature.local_binary_pattern(image3, LBP_POINTS, LBP_RADIUS, 'uniform')
+    
+    fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(nrows=2, ncols=3,
+                                                           figsize=(9, 6))
+    plt.gray()
+    ax1.imshow(image1)
+    ax1.axis('off')
+    hist(ax4, lbp1)
+    ax4.set_ylabel('img1')
+
+    ax2.imshow(image2)
+    ax2.axis('off')
+    hist(ax5, lbp2)
+    ax5.set_ylabel('img2')
+
+    ax3.imshow(image3)
+    ax3.axis('off')
+    hist(ax6, lbp3)
+    ax6.set_ylabel('img2')
+
+    plt.show()
+
+
 def test():
+
     print '-- test lbp'
     image = io.imread('images/image1.jpg')
     gray = color.rgb2gray(image)
@@ -251,8 +294,8 @@ if __name__ == '__main__':
         test()
     elif process_type == 'detect': 
         test_detect("./query/pos_query_1.jpg")
+    elif process_type == 'lbp':
+        test_lbp()
     else:
         print "ineffective option."
 
-#io.imshow(image)
-#io.show()
