@@ -17,9 +17,9 @@ import matplotlib.patches as mpatches
 import math
 
 WINDOW_SIZE = 48
-CELL_SIZE = 2
-THRESHOLD = 1.0
-LBP_POINTS = 16
+CELL_SIZE = 1
+THRESHOLD = 1.5
+LBP_POINTS = 8
 LBP_RADIUS = 1
  
 # セルごとのLBP特徴計算
@@ -298,4 +298,3 @@ if __name__ == '__main__':
         test_lbp()
     else:
         print "ineffective option."
-
